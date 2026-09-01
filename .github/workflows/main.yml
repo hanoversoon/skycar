@@ -4,7 +4,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -13,15 +12,1160 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-      - name: Build
+      - name: Projeyi olustur ve derle
         run: |
-          ROOT=$(dirname "$(find . -name settings.gradle.kts | head -n 1)")
-          echo "Proje kok klasoru: $ROOT"
-          ls -la "$ROOT"
-          cd "$ROOT"
+          set -e
+          cat > settings.gradle.kts <<'__SKYEOF__'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "SkyCar"
+          include(":app")
+          __SKYEOF__
+          cat > build.gradle.kts <<'__SKYEOF__'
+          // Top-level build file
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          __SKYEOF__
+          cat > gradle.properties <<'__SKYEOF__'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          __SKYEOF__
+          mkdir -p app
+          cat > app/build.gradle.kts <<'__SKYEOF__'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.skywell.skycar"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.skywell.skycar"
+                  minSdk = 24          // Android 7.0 – most car head units are >= this
+                  targetSdk = 34
+                  versionCode = 3
+                  versionName = "1.2"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      proguardFiles(
+                          getDefaultProguardFile("proguard-android-optimize.txt"),
+                          "proguard-rules.pro"
+                      )
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+              buildFeatures {
+                  viewBinding = true
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("com.google.android.material:material:1.12.0")
+              implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+              implementation("androidx.recyclerview:recyclerview:1.3.2")
+          }
+          __SKYEOF__
+          cat > app/proguard-rules.pro <<'__SKYEOF__'
+          # Add project specific ProGuard rules here.
+          __SKYEOF__
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <!-- Media keys go through AudioManager (no permission needed).
+                   QUERY_ALL_PACKAGES lets the launcher see and open the car's apps
+                   on Android 11+ (this app is sideloaded, not distributed via Play). -->
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent>
+              </queries>
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/ic_launcher"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.SkyCar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="landscape"
+                      android:launchMode="singleTask"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+
+                      <!-- Normal app launcher entry -->
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                      <!-- Optional: allow this app to be chosen as the car HOME screen.
+                           Comment this block out if you do NOT want it to replace the
+                           stock home launcher. -->
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.HOME" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                      </intent-filter>
+                  </activity>
+
+                  <activity
+                      android:name=".VehicleActivity"
+                      android:exported="false"
+                      android:screenOrientation="landscape"
+                      android:theme="@style/Theme.SkyCar" />
+
+                  <activity
+                      android:name=".ClimateActivity"
+                      android:exported="false"
+                      android:screenOrientation="landscape"
+                      android:theme="@style/Theme.SkyCar" />
+
+              </application>
+          </manifest>
+          __SKYEOF__
+          mkdir -p app/src/main/java/com/skywell/skycar
+          cat > app/src/main/java/com/skywell/skycar/AppItem.kt <<'__SKYEOF__'
+          package com.skywell.skycar
+
+          import androidx.annotation.ColorRes
+          import androidx.annotation.DrawableRes
+          import androidx.annotation.StringRes
+
+          /**
+           * One tile on the CarPlay-style home grid.
+           *
+           * A tile either launches an installed app by [pkg], or opens one of our own
+           * internal screens via [internal]. If [pkg] is set but that app cannot be
+           * launched, we fall back to [internal] when provided.
+           */
+          data class AppItem(
+              @StringRes val labelRes: Int,
+              @DrawableRes val iconRes: Int,
+              @ColorRes val colorRes: Int,
+              val pkg: String? = null,
+              val internal: String? = null
+          ) {
+              companion object {
+                  // Internal screen ids
+                  const val VEHICLE = "vehicle"
+                  const val CLIMATE = "climate"
+              }
+          }
+          __SKYEOF__
+          cat > app/src/main/java/com/skywell/skycar/AppsAdapter.kt <<'__SKYEOF__'
+          package com.skywell.skycar
+
+          import android.content.res.ColorStateList
+          import android.view.LayoutInflater
+          import android.view.ViewGroup
+          import androidx.core.content.ContextCompat
+          import androidx.recyclerview.widget.RecyclerView
+          import com.skywell.skycar.databinding.ItemAppBinding
+
+          class AppsAdapter(
+              private val items: List<AppItem>,
+              private val onClick: (AppItem) -> Unit
+          ) : RecyclerView.Adapter<AppsAdapter.VH>() {
+
+              inner class VH(val b: ItemAppBinding) : RecyclerView.ViewHolder(b.root)
+
+              override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+                  val b = ItemAppBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+                  return VH(b)
+              }
+
+              override fun onBindViewHolder(holder: VH, position: Int) {
+                  val item = items[position]
+                  val ctx = holder.b.root.context
+                  holder.b.label.setText(item.labelRes)
+                  holder.b.icon.setImageResource(item.iconRes)
+                  // tint the rounded tile with the item's accent color
+                  holder.b.tile.backgroundTintList =
+                      ColorStateList.valueOf(ContextCompat.getColor(ctx, item.colorRes))
+                  holder.b.root.setOnClickListener { onClick(item) }
+              }
+
+              override fun getItemCount() = items.size
+          }
+          __SKYEOF__
+          cat > app/src/main/java/com/skywell/skycar/MainActivity.kt <<'__SKYEOF__'
+          package com.skywell.skycar
+
+          import android.content.Intent
+          import android.media.AudioManager
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.KeyEvent
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.recyclerview.widget.GridLayoutManager
+          import com.skywell.skycar.databinding.ActivityMainBinding
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var b: ActivityMainBinding
+              private lateinit var audio: AudioManager
+              private var isPlaying = false
+
+              private val clockHandler = Handler(Looper.getMainLooper())
+              private val clockTick = object : Runnable {
+                  override fun run() {
+                      updateClock()
+                      clockHandler.postDelayed(this, 1000)
+                  }
+              }
+
+              // Tiles wired to THIS car's real apps (Skywell / coocaa OS).
+              private val tiles = listOf(
+                  AppItem(R.string.tile_maps,       R.drawable.ic_maps,     R.color.tile_maps,     pkg = "ru.yandex.yandexnavi"),
+                  AppItem(R.string.tile_phone,      R.drawable.ic_phone,    R.color.tile_phone,    pkg = "com.skyworth.car.skycommunication"),
+                  AppItem(R.string.tile_btmusic,    R.drawable.ic_music,    R.color.tile_music,    pkg = "com.skyworth.car.carbtmusic"),
+                  AppItem(R.string.tile_localmusic, R.drawable.ic_music,    R.color.tile_spotify,  pkg = "com.skyworth.car.localmedia"),
+                  AppItem(R.string.tile_radio,      R.drawable.ic_radio,    R.color.tile_radio,    pkg = "com.skyworth.car.carradio"),
+                  AppItem(R.string.tile_climate,    R.drawable.ic_climate,  R.color.tile_climate,  pkg = "com.coolwell.ai.skyhvac", internal = AppItem.CLIMATE),
+                  AppItem(R.string.tile_mirror,     R.drawable.ic_mirror,   R.color.tile_mirror,   pkg = "net.easyconn"),
+                  AppItem(R.string.tile_settings,   R.drawable.ic_settings, R.color.tile_settings, pkg = "com.skyworth.car.systemsettings"),
+              )
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  b = ActivityMainBinding.inflate(layoutInflater)
+                  setContentView(b.root)
+
+                  audio = getSystemService(AUDIO_SERVICE) as AudioManager
+
+                  b.rvApps.layoutManager = GridLayoutManager(this, 4)
+                  b.rvApps.adapter = AppsAdapter(tiles) { onTile(it) }
+
+                  b.btnPrev.setOnClickListener { sendMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS) }
+                  b.btnNext.setOnClickListener { sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) }
+                  b.btnPlay.setOnClickListener {
+                      sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                      isPlaying = !isPlaying
+                      b.btnPlay.setImageResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play)
+                  }
+                  // Tapping the now-playing area opens the Bluetooth music app
+                  b.npAlbum.setOnClickListener { openApp("com.skyworth.car.carbtmusic", null) }
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  clockTick.run()
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  clockHandler.removeCallbacks(clockTick)
+              }
+
+              private fun updateClock() {
+                  val now = Date()
+                  b.clock.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now)
+                  b.date.text = SimpleDateFormat("EEEE, d MMMM", Locale("tr", "TR")).format(now)
+              }
+
+              private fun onTile(item: AppItem) {
+                  when {
+                      item.pkg != null -> openApp(item.pkg, item.internal)
+                      item.internal != null -> openInternal(item.internal)
+                      else -> toast(getString(R.string.not_installed))
+                  }
+              }
+
+              /** Launch an installed app by package; fall back to an internal screen or a toast. */
+              private fun openApp(pkg: String, fallbackInternal: String?) {
+                  val launch = packageManager.getLaunchIntentForPackage(pkg)
+                  if (launch != null) {
+                      launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                      startActivity(launch)
+                      return
+                  }
+                  if (fallbackInternal != null) {
+                      openInternal(fallbackInternal)
+                  } else {
+                      toast(getString(R.string.not_installed))
+                  }
+              }
+
+              private fun openInternal(which: String) {
+                  when (which) {
+                      AppItem.VEHICLE -> startActivity(Intent(this, VehicleActivity::class.java))
+                      AppItem.CLIMATE -> startActivity(Intent(this, ClimateActivity::class.java))
+                  }
+              }
+
+              private fun sendMediaKey(keyCode: Int) {
+                  audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+                  audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+              }
+
+              private fun toast(msg: String) =
+                  Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+              override fun onBackPressed() { /* stay on home */ }
+          }
+          __SKYEOF__
+          cat > app/src/main/java/com/skywell/skycar/VehicleActivity.kt <<'__SKYEOF__'
+          package com.skywell.skycar
+
+          import android.os.BatteryManager
+          import android.os.Bundle
+          import androidx.appcompat.app.AppCompatActivity
+          import com.skywell.skycar.databinding.ActivityVehicleBinding
+
+          /**
+           * Vehicle info screen.
+           *
+           * NOTE: Real vehicle telemetry (speed, state of charge, range, odometer) comes
+           * from the car's CAN bus and is only exposed through the manufacturer's
+           * (Skywell) system APIs, which require a signed system app. The values below are
+           * a UI template. The head-unit battery level is read as a live example so you
+           * can see how a real signal would be bound.
+           */
+          class VehicleActivity : AppCompatActivity() {
+
+              private lateinit var b: ActivityVehicleBinding
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  b = ActivityVehicleBinding.inflate(layoutInflater)
+                  setContentView(b.root)
+
+                  b.btnBack.setOnClickListener { finish() }
+
+                  // Live example: head-unit battery percentage
+                  val bm = getSystemService(BATTERY_SERVICE) as? BatteryManager
+                  val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+                  if (pct in 0..100) b.valBattery.text = "$pct %"
+              }
+          }
+          __SKYEOF__
+          cat > app/src/main/java/com/skywell/skycar/ClimateActivity.kt <<'__SKYEOF__'
+          package com.skywell.skycar
+
+          import android.os.Bundle
+          import androidx.appcompat.app.AppCompatActivity
+          import com.skywell.skycar.databinding.ActivityClimateBinding
+
+          /**
+           * Climate UI template.
+           *
+           * NOTE: Actually driving the HVAC hardware requires the manufacturer (Skywell)
+           * API / a system-signed app. This screen keeps local state so the controls feel
+           * real; wire the setters to the OEM API to make them live.
+           */
+          class ClimateActivity : AppCompatActivity() {
+
+              private lateinit var b: ActivityClimateBinding
+
+              private var temp = 22.0   // °C
+              private var fan = 3       // 0..7
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  b = ActivityClimateBinding.inflate(layoutInflater)
+                  setContentView(b.root)
+
+                  b.btnBack.setOnClickListener { finish() }
+
+                  renderTemp()
+                  renderFan()
+
+                  b.btnTempUp.setOnClickListener {
+                      if (temp < 30.0) { temp += 0.5; renderTemp() }
+                  }
+                  b.btnTempDown.setOnClickListener {
+                      if (temp > 16.0) { temp -= 0.5; renderTemp() }
+                  }
+                  b.btnFanUp.setOnClickListener {
+                      if (fan < 7) { fan++; renderFan() }
+                  }
+                  b.btnFanDown.setOnClickListener {
+                      if (fan > 0) { fan--; renderFan() }
+                  }
+              }
+
+              private fun renderTemp() {
+                  b.valTemp.text = String.format("%.1f°", temp)
+              }
+
+              private fun renderFan() {
+                  b.valFan.text = fan.toString()
+              }
+          }
+          __SKYEOF__
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/colors.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="bg_top">#0B1220</color>
+              <color name="bg_bottom">#131C2E</color>
+              <color name="surface">#1C2740</color>
+              <color name="surface_press">#2A3A5E</color>
+              <color name="text_primary">#FFFFFF</color>
+              <color name="text_secondary">#9AA7BD</color>
+
+              <!-- Tile accent colors (CarPlay-like) -->
+              <color name="tile_maps">#2E7D32</color>
+              <color name="tile_phone">#2E9E5B</color>
+              <color name="tile_music">#E5384F</color>
+              <color name="tile_spotify">#1DB954</color>
+              <color name="tile_vehicle">#3A6EA5</color>
+              <color name="tile_climate">#00A6B8</color>
+              <color name="tile_radio">#F2711C</color>
+              <color name="tile_settings">#6C63FF</color>
+              <color name="tile_mirror">#8A63FF</color>
+
+              <color name="accent">#3DD6D0</color>
+              <color name="black">#000000</color>
+              <color name="white">#FFFFFF</color>
+          </resources>
+          __SKYEOF__
+          cat > app/src/main/res/values/strings.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">SkyCar</string>
+
+              <string name="tile_maps">Navigasyon</string>
+              <string name="tile_phone">Telefon</string>
+              <string name="tile_btmusic">Bluetooth Müzik</string>
+              <string name="tile_localmusic">Yerel Müzik</string>
+              <string name="tile_music">Müzik</string>
+              <string name="tile_spotify">Spotify</string>
+              <string name="tile_vehicle">Araç Bilgisi</string>
+              <string name="tile_climate">Klima</string>
+              <string name="tile_radio">Radyo</string>
+              <string name="tile_mirror">Ekran Bağlantı</string>
+              <string name="tile_settings">Ayarlar</string>
+
+              <string name="now_playing_idle">Çalınan parça yok</string>
+              <string name="bt_hint">Bluetooth üzerinden bağlı cihaz</string>
+
+              <string name="not_installed">Uygulama yüklü değil</string>
+
+              <!-- Vehicle screen -->
+              <string name="vehicle_title">Araç Bilgisi</string>
+              <string name="speed">Hız</string>
+              <string name="battery">Batarya</string>
+              <string name="range">Menzil</string>
+              <string name="odo">Kilometre</string>
+              <string name="vehicle_note">Not: Gerçek araç verileri (CAN veri yolu) yalnızca üreticinin (Skywell) sistem API\'leriyle okunabilir. Bu ekran arayüz ve entegrasyon şablonudur.</string>
+
+              <!-- Climate screen -->
+              <string name="climate_title">Klima Kontrol</string>
+              <string name="temperature">Sıcaklık</string>
+              <string name="fan">Fan</string>
+              <string name="ac">A/C</string>
+              <string name="climate_note">Not: Klima donanımını gerçek kontrol için üretici (Skywell) API\'si gerekir. Bu ekran görsel şablondur.</string>
+          </resources>
+          __SKYEOF__
+          cat > app/src/main/res/values/themes.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.SkyCar" parent="Theme.Material3.Dark.NoActionBar">
+                  <item name="android:windowNoTitle">true</item>
+                  <item name="android:windowFullscreen">true</item>
+                  <item name="android:statusBarColor">@color/bg_top</item>
+                  <item name="android:navigationBarColor">@color/bg_bottom</item>
+                  <item name="android:windowBackground">@drawable/bg_gradient</item>
+              </style>
+          </resources>
+          __SKYEOF__
+          cat > app/src/main/res/values/styles.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="StatCard">
+                  <item name="android:layout_width">330dp</item>
+                  <item name="android:layout_height">wrap_content</item>
+                  <item name="android:layout_margin">8dp</item>
+                  <item name="android:orientation">vertical</item>
+                  <item name="android:background">@drawable/card_bg</item>
+                  <item name="android:padding">20dp</item>
+              </style>
+
+              <style name="StatLabel">
+                  <item name="android:layout_width">wrap_content</item>
+                  <item name="android:layout_height">wrap_content</item>
+                  <item name="android:textColor">@color/text_secondary</item>
+                  <item name="android:textSize">15sp</item>
+              </style>
+
+              <style name="StatValue">
+                  <item name="android:layout_width">wrap_content</item>
+                  <item name="android:layout_height">wrap_content</item>
+                  <item name="android:layout_marginTop">6dp</item>
+                  <item name="android:textColor">@color/accent</item>
+                  <item name="android:textSize">32sp</item>
+                  <item name="android:textStyle">bold</item>
+              </style>
+          </resources>
+          __SKYEOF__
+          mkdir -p app/src/main/res/layout
+          cat > app/src/main/res/layout/activity_main.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.constraintlayout.widget.ConstraintLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:padding="16dp">
+
+              <!-- ===== Top status bar ===== -->
+              <TextView
+                  android:id="@+id/clock"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="17:37"
+                  android:textColor="@color/text_primary"
+                  android:textSize="26sp"
+                  android:textStyle="bold"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintTop_toTopOf="parent" />
+
+              <TextView
+                  android:id="@+id/date"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginStart="14dp"
+                  android:text="Pazartesi, 1 Eylül"
+                  android:textColor="@color/text_secondary"
+                  android:textSize="15sp"
+                  app:layout_constraintBottom_toBottomOf="@id/clock"
+                  app:layout_constraintStart_toEndOf="@id/clock"
+                  app:layout_constraintTop_toTopOf="@id/clock" />
+
+              <ImageView
+                  android:id="@+id/iconWifi"
+                  android:layout_width="22dp"
+                  android:layout_height="22dp"
+                  android:layout_marginEnd="16dp"
+                  android:src="@drawable/ic_wifi"
+                  app:layout_constraintBottom_toBottomOf="@id/clock"
+                  app:layout_constraintEnd_toStartOf="@id/iconBt"
+                  app:layout_constraintTop_toTopOf="@id/clock" />
+
+              <ImageView
+                  android:id="@+id/iconBt"
+                  android:layout_width="22dp"
+                  android:layout_height="22dp"
+                  android:src="@drawable/ic_bluetooth"
+                  app:layout_constraintBottom_toBottomOf="@id/clock"
+                  app:layout_constraintEnd_toEndOf="parent"
+                  app:layout_constraintTop_toTopOf="@id/clock" />
+
+              <!-- ===== App grid ===== -->
+              <androidx.recyclerview.widget.RecyclerView
+                  android:id="@+id/rvApps"
+                  android:layout_width="0dp"
+                  android:layout_height="0dp"
+                  android:layout_marginTop="18dp"
+                  android:clipToPadding="false"
+                  app:layout_constraintTop_toBottomOf="@id/clock"
+                  app:layout_constraintBottom_toTopOf="@id/npBar"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <!-- ===== Now playing bar ===== -->
+              <LinearLayout
+                  android:id="@+id/npBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="76dp"
+                  android:layout_marginTop="12dp"
+                  android:background="@drawable/card_bg"
+                  android:gravity="center_vertical"
+                  android:orientation="horizontal"
+                  android:paddingHorizontal="16dp"
+                  app:layout_constraintBottom_toBottomOf="parent"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent">
+
+                  <ImageView
+                      android:id="@+id/npAlbum"
+                      android:layout_width="48dp"
+                      android:layout_height="48dp"
+                      android:background="@drawable/circle_accent"
+                      android:padding="12dp"
+                      android:src="@drawable/ic_music"
+                      app:tint="@color/accent" />
+
+                  <LinearLayout
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_marginStart="14dp"
+                      android:layout_weight="1"
+                      android:orientation="vertical">
+
+                      <TextView
+                          android:id="@+id/npTitle"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:ellipsize="end"
+                          android:maxLines="1"
+                          android:text="@string/now_playing_idle"
+                          android:textColor="@color/text_primary"
+                          android:textSize="17sp"
+                          android:textStyle="bold" />
+
+                      <TextView
+                          android:id="@+id/npArtist"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:ellipsize="end"
+                          android:maxLines="1"
+                          android:text="@string/bt_hint"
+                          android:textColor="@color/text_secondary"
+                          android:textSize="14sp" />
+                  </LinearLayout>
+
+                  <ImageButton
+                      android:id="@+id/btnPrev"
+                      android:layout_width="52dp"
+                      android:layout_height="52dp"
+                      android:background="?attr/selectableItemBackgroundBorderless"
+                      android:src="@drawable/ic_prev"
+                      app:tint="@color/text_primary" />
+
+                  <ImageButton
+                      android:id="@+id/btnPlay"
+                      android:layout_width="56dp"
+                      android:layout_height="56dp"
+                      android:layout_marginHorizontal="6dp"
+                      android:background="?attr/selectableItemBackgroundBorderless"
+                      android:src="@drawable/ic_play"
+                      app:tint="@color/accent" />
+
+                  <ImageButton
+                      android:id="@+id/btnNext"
+                      android:layout_width="52dp"
+                      android:layout_height="52dp"
+                      android:background="?attr/selectableItemBackgroundBorderless"
+                      android:src="@drawable/ic_next"
+                      app:tint="@color/text_primary" />
+              </LinearLayout>
+
+          </androidx.constraintlayout.widget.ConstraintLayout>
+          __SKYEOF__
+          cat > app/src/main/res/layout/item_app.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:gravity="center_horizontal"
+              android:orientation="vertical"
+              android:paddingVertical="10dp">
+
+              <FrameLayout
+                  android:id="@+id/tile"
+                  android:layout_width="86dp"
+                  android:layout_height="86dp"
+                  android:background="@drawable/tile_square"
+                  android:foreground="@drawable/ripple_square">
+
+                  <ImageView
+                      android:id="@+id/icon"
+                      android:layout_width="46dp"
+                      android:layout_height="46dp"
+                      android:layout_gravity="center"
+                      android:src="@drawable/ic_maps"
+                      app:tint="@color/white" />
+              </FrameLayout>
+
+              <TextView
+                  android:id="@+id/label"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="8dp"
+                  android:maxLines="1"
+                  android:text="@string/tile_maps"
+                  android:textColor="@color/text_primary"
+                  android:textSize="14sp" />
+          </LinearLayout>
+          __SKYEOF__
+          cat > app/src/main/res/layout/activity_vehicle.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="18dp">
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:gravity="center_vertical"
+                  android:orientation="horizontal">
+
+                  <ImageButton
+                      android:id="@+id/btnBack"
+                      android:layout_width="48dp"
+                      android:layout_height="48dp"
+                      android:background="?attr/selectableItemBackgroundBorderless"
+                      android:src="@drawable/ic_back"
+                      app:tint="@color/text_primary" />
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginStart="10dp"
+                      android:text="@string/vehicle_title"
+                      android:textColor="@color/text_primary"
+                      android:textSize="24sp"
+                      android:textStyle="bold" />
+              </LinearLayout>
+
+              <GridLayout
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="18dp"
+                  android:columnCount="2">
+
+                  <!-- Speed -->
+                  <LinearLayout style="@style/StatCard">
+                      <TextView style="@style/StatLabel" android:text="@string/speed" />
+                      <TextView android:id="@+id/valSpeed" style="@style/StatValue" android:text="0 km/s" />
+                  </LinearLayout>
+
+                  <!-- Battery -->
+                  <LinearLayout style="@style/StatCard">
+                      <TextView style="@style/StatLabel" android:text="@string/battery" />
+                      <TextView android:id="@+id/valBattery" style="@style/StatValue" android:text="82 %" />
+                  </LinearLayout>
+
+                  <!-- Range -->
+                  <LinearLayout style="@style/StatCard">
+                      <TextView style="@style/StatLabel" android:text="@string/range" />
+                      <TextView android:id="@+id/valRange" style="@style/StatValue" android:text="410 km" />
+                  </LinearLayout>
+
+                  <!-- Odometer -->
+                  <LinearLayout style="@style/StatCard">
+                      <TextView style="@style/StatLabel" android:text="@string/odo" />
+                      <TextView android:id="@+id/valOdo" style="@style/StatValue" android:text="24.860 km" />
+                  </LinearLayout>
+              </GridLayout>
+
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="18dp"
+                  android:text="@string/vehicle_note"
+                  android:textColor="@color/text_secondary"
+                  android:textSize="13sp" />
+          </LinearLayout>
+          __SKYEOF__
+          cat > app/src/main/res/layout/activity_climate.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="18dp">
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:gravity="center_vertical"
+                  android:orientation="horizontal">
+
+                  <ImageButton
+                      android:id="@+id/btnBack"
+                      android:layout_width="48dp"
+                      android:layout_height="48dp"
+                      android:background="?attr/selectableItemBackgroundBorderless"
+                      android:src="@drawable/ic_back"
+                      app:tint="@color/text_primary" />
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginStart="10dp"
+                      android:text="@string/climate_title"
+                      android:textColor="@color/text_primary"
+                      android:textSize="24sp"
+                      android:textStyle="bold" />
+              </LinearLayout>
+
+              <!-- Temperature control -->
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="22dp"
+                  android:background="@drawable/card_bg"
+                  android:gravity="center_vertical"
+                  android:orientation="horizontal"
+                  android:padding="18dp">
+
+                  <ImageView
+                      android:layout_width="34dp"
+                      android:layout_height="34dp"
+                      android:src="@drawable/ic_snow"
+                      app:tint="@color/tile_climate" />
+
+                  <TextView
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_marginStart="14dp"
+                      android:layout_weight="1"
+                      android:text="@string/temperature"
+                      android:textColor="@color/text_primary"
+                      android:textSize="18sp" />
+
+                  <Button
+                      android:id="@+id/btnTempDown"
+                      android:layout_width="60dp"
+                      android:layout_height="60dp"
+                      android:text="–"
+                      android:textSize="26sp" />
+
+                  <TextView
+                      android:id="@+id/valTemp"
+                      android:layout_width="120dp"
+                      android:layout_height="wrap_content"
+                      android:gravity="center"
+                      android:text="22.0°"
+                      android:textColor="@color/accent"
+                      android:textSize="30sp"
+                      android:textStyle="bold" />
+
+                  <Button
+                      android:id="@+id/btnTempUp"
+                      android:layout_width="60dp"
+                      android:layout_height="60dp"
+                      android:text="+"
+                      android:textSize="24sp" />
+              </LinearLayout>
+
+              <!-- Fan control -->
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="14dp"
+                  android:background="@drawable/card_bg"
+                  android:gravity="center_vertical"
+                  android:orientation="horizontal"
+                  android:padding="18dp">
+
+                  <TextView
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="@string/fan"
+                      android:textColor="@color/text_primary"
+                      android:textSize="18sp" />
+
+                  <Button
+                      android:id="@+id/btnFanDown"
+                      android:layout_width="60dp"
+                      android:layout_height="60dp"
+                      android:text="–"
+                      android:textSize="26sp" />
+
+                  <TextView
+                      android:id="@+id/valFan"
+                      android:layout_width="120dp"
+                      android:layout_height="wrap_content"
+                      android:gravity="center"
+                      android:text="3"
+                      android:textColor="@color/accent"
+                      android:textSize="30sp"
+                      android:textStyle="bold" />
+
+                  <Button
+                      android:id="@+id/btnFanUp"
+                      android:layout_width="60dp"
+                      android:layout_height="60dp"
+                      android:text="+"
+                      android:textSize="24sp" />
+              </LinearLayout>
+
+              <!-- A/C toggle -->
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="14dp"
+                  android:background="@drawable/card_bg"
+                  android:gravity="center_vertical"
+                  android:orientation="horizontal"
+                  android:padding="18dp">
+
+                  <TextView
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="@string/ac"
+                      android:textColor="@color/text_primary"
+                      android:textSize="18sp" />
+
+                  <Switch
+                      android:id="@+id/switchAc"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:checked="true" />
+              </LinearLayout>
+
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="18dp"
+                  android:text="@string/climate_note"
+                  android:textColor="@color/text_secondary"
+                  android:textSize="13sp" />
+          </LinearLayout>
+          __SKYEOF__
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/bg_gradient.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <gradient
+                  android:angle="270"
+                  android:startColor="@color/bg_top"
+                  android:endColor="@color/bg_bottom" />
+          </shape>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/card_bg.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="@color/surface" />
+              <corners android:radius="22dp" />
+          </shape>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/circle_accent.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="oval">
+              <solid android:color="@color/surface_press" />
+          </shape>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_back.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_bluetooth.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M17.71,7.71L12,2h-1v7.59L6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 11,14.41V22h1l5.71,-5.71 -4.3,-4.29 4.3,-4.29zM13,5.83l1.88,1.88L13,9.59V5.83zM14.88,16.29L13,18.17v-3.76l1.88,1.88z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_car.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M18.92,6.01C18.72,5.42 18.16,5 17.5,5h-11c-0.66,0 -1.21,0.42 -1.42,1.01L3,12v8c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-1h12v1c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-8l-2.08,-5.99zM6.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5S5.67,13 6.5,13 8,13.67 8,14.5 7.33,16 6.5,16zM17.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5S16.67,13 17.5,13 19,13.67 19,14.5 18.33,16 17.5,16zM5,11l1.5,-4.5h11L19,11H5z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_climate.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M11,2h2v5l2,-2 1.4,1.4L13,10.8V13h2.2l3.4,-3.4L20,11l-2,2h5v2h-5l2,2 -1.4,1.4 -3.4,-3.4H13v2.2l3.4,3.4L15,22l-2,-2v5h-2v-5l-2,2 -1.4,-1.4L11,13.2V11H8.8l-3.4,3.4L4,13l2,-2H1v-2h5L4,7l1.4,-1.4L8.8,9H11V6.8L7.6,3.4 9,2l2,2z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="48dp" android:height="48dp"
+              android:viewportWidth="48" android:viewportHeight="48">
+              <path android:fillColor="#131C2E" android:pathData="M0,0h48v48h-48z"/>
+              <path android:fillColor="#1C2740" android:pathData="M0,0h48v26h-48z"/>
+              <group android:translateX="12" android:translateY="12">
+                  <path android:fillColor="#3DD6D0"
+                      android:pathData="M18.92,6.01C18.72,5.42 18.16,5 17.5,5h-11c-0.66,0 -1.21,0.42 -1.42,1.01L3,12v8c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-1h12v1c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-8l-2.08,-5.99zM6.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5S5.67,13 6.5,13 8,13.67 8,14.5 7.33,16 6.5,16zM17.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5S16.67,13 17.5,13 19,13.67 19,14.5 18.33,16 17.5,16zM5,11l1.5,-4.5h11L19,11H5z"/>
+              </group>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <group android:scaleX="2.2" android:scaleY="2.2" android:translateX="30" android:translateY="30">
+                  <path android:fillColor="#3DD6D0"
+                      android:pathData="M18.92,6.01C18.72,5.42 18.16,5 17.5,5h-11c-0.66,0 -1.21,0.42 -1.42,1.01L3,12v8c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-1h12v1c0,0.55 0.45,1 1,1h1c0.55,0 1,-0.45 1,-1v-8l-2.08,-5.99zM6.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5S5.67,13 6.5,13 8,13.67 8,14.5 7.33,16 6.5,16zM17.5,16c-0.83,0 -1.5,-0.67 -1.5,-1.5S16.67,13 17.5,13 19,13.67 19,14.5 18.33,16 17.5,16zM5,11l1.5,-4.5h11L19,11H5z"/>
+              </group>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_maps.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7,-7.75 7,-13c0,-3.87 -3.13,-7 -7,-7zM12,11.5c-1.38,0 -2.5,-1.12 -2.5,-2.5s1.12,-2.5 2.5,-2.5 2.5,1.12 2.5,2.5 -1.12,2.5 -2.5,2.5z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_mirror.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M21,3H3C1.9,3 1,3.9 1,5v12c0,1.1 0.9,2 2,2h5v2h8v-2h5c1.1,0 2,-0.9 2,-2V5c0,-1.1 -0.9,-2 -2,-2zM21,17H3V5h18v12zM10,7.5v6l5,-3z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_music.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_next.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_pause.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M6,19h4V5H6v14zM14,5v14h4V5h-4z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_phone.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M6.62,10.79c1.44,2.83 3.76,5.14 6.59,6.59l2.2,-2.2c0.27,-0.27 0.67,-0.36 1.02,-0.24 1.12,0.37 2.33,0.57 3.57,0.57 0.55,0 1,0.45 1,1V20c0,0.55 -0.45,1 -1,1 -9.39,0 -17,-7.61 -17,-17 0,-0.55 0.45,-1 1,-1h3.5c0.55,0 1,0.45 1,1 0,1.25 0.2,2.45 0.57,3.57 0.11,0.35 0.03,0.74 -0.25,1.02l-2.2,2.2z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_play.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M8,5v14l11,-7z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_prev.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M6,6h2v12H6zM9.5,12l8.5,6V6z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_radio.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M3.24,6.15C2.51,6.43 2,7.17 2,8v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V8c0,-1.1 -0.9,-2 -2,-2H8.3l8.26,-3.34L15.88,1 3.24,6.15zM7,20c-1.66,0 -3,-1.34 -3,-3s1.34,-3 3,-3 3,1.34 3,3 -1.34,3 -3,3zM20,12h-2v-2h-2v2H4V8h16v4z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_settings.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94 0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87c-0.12,0.21 -0.08,0.47 0.12,0.61l2.03,1.58c-0.05,0.3 -0.09,0.63 -0.09,0.94s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61l-2.01,-1.58zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6 3.6,1.62 3.6,3.6 -1.62,3.6 -3.6,3.6z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_snow.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M22,11h-4.17l3.24,-3.24 -1.41,-1.42L15,11h-2V9l4.66,-4.66 -1.42,-1.41L13,6.17V2h-2v4.17L7.76,2.93 6.34,4.34 11,9v2H9L4.34,6.34 2.93,7.76 6.17,11H2v2h4.17l-3.24,3.24 1.41,1.42L9,13h2v2l-4.66,4.66 1.42,1.41L11,17.83V22h2v-4.17l3.24,3.24 1.42,-1.41L13,15v-2h2l4.66,4.66 1.41,-1.42L17.83,13H22z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_spotify.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM16.5,16.3c-0.18,0.29 -0.56,0.38 -0.85,0.2 -2.33,-1.42 -5.27,-1.75 -8.72,-0.96 -0.33,0.08 -0.66,-0.13 -0.74,-0.46 -0.08,-0.33 0.13,-0.66 0.46,-0.74 3.78,-0.86 7.03,-0.49 9.65,1.11 0.29,0.18 0.38,0.56 0.2,0.85zM17.7,13.6c-0.22,0.36 -0.7,0.48 -1.06,0.26 -2.67,-1.64 -6.73,-2.11 -9.89,-1.16 -0.4,0.12 -0.83,-0.11 -0.95,-0.51 -0.12,-0.4 0.11,-0.83 0.51,-0.95 3.6,-1.09 8.08,-0.56 11.14,1.32 0.36,0.22 0.48,0.7 0.25,1.04zM17.8,10.8c-3.2,-1.9 -8.48,-2.08 -11.53,-1.15 -0.48,0.14 -0.99,-0.13 -1.13,-0.61 -0.14,-0.48 0.13,-0.99 0.61,-1.13 3.5,-1.06 9.33,-0.86 13.01,1.33 0.43,0.26 0.57,0.81 0.32,1.24 -0.26,0.44 -0.82,0.58 -1.29,0.32z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ic_wifi.xml <<'__SKYEOF__'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24"
+              android:tint="#FFFFFFFF">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M1,9l2,2c4.97,-4.97 13.03,-4.97 18,0l2,-2C16.93,2.93 7.08,2.93 1,9zM9,17l3,3 3,-3c-1.65,-1.66 -4.34,-1.66 -6,0zM5,13l2,2c2.76,-2.76 7.24,-2.76 10,0l2,-2C15.14,9.14 8.87,9.14 5,13z"/>
+          </vector>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/ripple_square.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="#33FFFFFF">
+              <item android:id="@android:id/mask">
+                  <shape android:shape="rectangle">
+                      <solid android:color="@color/white" />
+                      <corners android:radius="26dp" />
+                  </shape>
+              </item>
+          </ripple>
+          __SKYEOF__
+          cat > app/src/main/res/drawable/tile_square.xml <<'__SKYEOF__'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="@color/white" />
+              <corners android:radius="26dp" />
+          </shape>
+          __SKYEOF__
+          echo "=== olusan proje ==="
+          ls -la
           gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: SkyCar-apk
-          path: '**/app/build/outputs/apk/debug/app-debug.apk'
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
