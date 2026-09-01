@@ -62,8 +62,8 @@ jobs:
                   applicationId = "com.skywell.skycar"
                   minSdk = 24          // Android 7.0 – most car head units are >= this
                   targetSdk = 34
-                  versionCode = 3
-                  versionName = "1.2"
+                  versionCode = 4
+                  versionName = "1.3"
               }
 
               buildTypes {
@@ -259,7 +259,7 @@ jobs:
 
               // Tiles wired to THIS car's real apps (Skywell / coocaa OS).
               private val tiles = listOf(
-                  AppItem(R.string.tile_maps,       R.drawable.ic_maps,     R.color.tile_maps,     pkg = "ru.yandex.yandexnavi"),
+                  AppItem(R.string.tile_maps,       R.drawable.ic_maps,     R.color.tile_maps,     internal = "nav"),
                   AppItem(R.string.tile_phone,      R.drawable.ic_phone,    R.color.tile_phone,    pkg = "com.skyworth.car.skycommunication"),
                   AppItem(R.string.tile_btmusic,    R.drawable.ic_music,    R.color.tile_music,    pkg = "com.skyworth.car.carbtmusic"),
                   AppItem(R.string.tile_localmusic, R.drawable.ic_music,    R.color.tile_spotify,  pkg = "com.skyworth.car.localmedia"),
@@ -306,12 +306,37 @@ jobs:
                   b.date.text = SimpleDateFormat("EEEE, d MMMM", Locale("tr", "TR")).format(now)
               }
 
+              // Navigation apps to try, in priority order. First installed one wins;
+              // the car's built-in TurboDog is the last resort so this never fails.
+              private val navApps = listOf(
+                  "ru.yandex.yandexnavi",   // Yandex Navigasyon
+                  "ru.yandex.yandexmaps",   // Yandex Haritalar
+                  "net.osmand.plus",        // OsmAnd (F-Droid, ücretsiz)
+                  "net.osmand",             // OsmAnd+
+                  "com.sygic.aura",         // Sygic
+                  "com.astrob.turbodog"     // aracın kendi navigasyonu (her zaman var)
+              )
+
               private fun onTile(item: AppItem) {
                   when {
+                      item.internal == "nav" -> openNav()
                       item.pkg != null -> openApp(item.pkg, item.internal)
                       item.internal != null -> openInternal(item.internal)
                       else -> toast(getString(R.string.not_installed))
                   }
+              }
+
+              /** Open the first navigation app that is actually installed. */
+              private fun openNav() {
+                  for (p in navApps) {
+                      val i = packageManager.getLaunchIntentForPackage(p)
+                      if (i != null) {
+                          i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                          startActivity(i)
+                          return
+                      }
+                  }
+                  toast(getString(R.string.not_installed))
               }
 
               /** Launch an installed app by package; fall back to an internal screen or a toast. */
