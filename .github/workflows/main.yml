@@ -10,10 +10,15 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - run: chmod +x ./gradlew
-      - run: ./gradlew assembleDebug --no-daemon
+      - name: Build
+        run: |
+          DIR=$(dirname "$(find . -name gradlew | head -n 1)")
+          echo "Proje klasoru: $DIR"
+          cd "$DIR"
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: SkyCar-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: '**/app/build/outputs/apk/debug/app-debug.apk'
           if-no-files-found: error
